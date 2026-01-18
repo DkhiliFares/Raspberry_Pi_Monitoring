@@ -25,6 +25,17 @@ make
 sudo make install
 cd ..
 rm -rf pigpio-master master.zip
+
+### Configure Mosquitto for Remote Access
+By default, Mosquitto only allows local connections. To allow remote access:
+```bash
+# Create a config file to allow external connections
+echo "listener 1883" | sudo tee /etc/mosquitto/conf.d/external.conf
+echo "allow_anonymous true" | sudo tee -a /etc/mosquitto/conf.d/external.conf
+
+# Restart Mosquitto
+sudo systemctl restart mosquitto
+```
 ```
 
 ### Install Paho MQTT C & C++ Libraries
@@ -85,11 +96,17 @@ make
 Open two terminal windows (or tabs) to test sending and receiving.
 
 ### 1. Monitor All Outputs
-Subscribe to all `/rpi/` topics to see temperature, humidity, sensor JSON, status, and button events.
+**Local (on RPi):**
 ```bash
 mosquitto_sub -t "/rpi/#" -v
 ```
-*You should see data arriving every 10 seconds (default).*
+
+**Remote (from another Linux PC):**
+To connect from another computer, use the `-h` flag with your Raspberry Pi's IP address (e.g., `192.168.1.50`).
+```bash
+mosquitto_sub -h 192.168.1.XX -t "/rpi/#" -v
+```
+*(Replace `192.168.1.XX` with the actual IP of your Pi. Find it by running `hostname -I` on the Pi.)*
 
 ### 2. Send Control Commands
 In the second terminal, test the following commands:

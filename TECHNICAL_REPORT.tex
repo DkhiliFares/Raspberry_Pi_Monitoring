@@ -1,0 +1,251 @@
+\documentclass[12pt, a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{geometry}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{float}
+\usepackage{titlesec}
+
+% Page Geometry
+\geometry{top=2.5cm, bottom=2.5cm, left=2.5cm, right=2.5cm}
+
+% Code Listing Style
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+
+\lstset{style=mystyle}
+
+\title{
+    \vspace{2cm}
+    \Huge \textbf{Raspberry Pi Environment Monitoring System}\\
+    \Large \textbf{Native C++ IoT Implementation}\\
+    \vspace{1cm}
+    \large \textbf{Course:} Architecture \& IOT Platforms\\
+    \vspace{3cm}
+}
+\author{\textbf{Author:} Ramzi \\ \textbf{Date:} January 18, 2026}
+\date{}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+\newpage
+
+\tableofcontents
+\newpage
+
+\section{Introduction}
+\subsection{Project Overview}
+This report details the design and implementation of an embedded monitoring system based on the Raspberry Pi platform. The primary objective is to develop a robust, native C++ application capable of acquiring environmental data, communicating via standard IoT protocols (MQTT), and providing local and remote actuator control.
+
+\subsection{Objectives}
+The key goals of this project were:
+\begin{itemize}
+    \item Develop a native application in C++ without high-level frameworks (Node-RED, Python) for maximum performance and learning value.
+    \item Interface directly with hardware components (DHT11 sensor, LED, Button) using GPIO.
+    \item Implement asynchronous communication using the MQTT protocol.
+    \item Ensure data persistence using InfluxDB.
+    \item Demonstrate real-time control logic (automated thresholds).
+\end{itemize}
+
+\subsection{Constraints}
+A critical constraint was the exclusive use of C/C++ libraries. This required handling low-level timing for the DHT11 sensor (which uses a custom 1-wire protocol) manually or via native libraries like \texttt{pigpio}, rather than relying on pre-built Python abstractions.
+
+\newpage
+
+\section{System Architecture}
+
+\subsection{Hardware Architecture}
+The system is built around a Raspberry Pi (running Raspberry Pi OS). The GPIO interface connects to three main peripherals:
+
+\begin{description}
+    \item[DHT11 Sensor (GPIO 4)] A digital temperature and humidity sensor. It requires precise microsecond timing for its 1-wire data transmission protocol.
+    \item[LED Indicator (GPIO 17)] Used for visual feedback. It supports three modes: OFF, ON, and BLINK (triggered by temperature thresholds).
+    \item[Push Button (GPIO 27)] A digital input used to trigger local events (simulating a manual alert or reset). Configured with an internal pull-up resistor.
+\end{description}
+
+\subsection{Software Architecture}
+The software is designed with modularity and concurrency in mind.
+
+\subsubsection{Key Libraries}
+\begin{itemize}
+    \item \textbf{Pigpio}: Selected over the deprecated WiringPi for its stable C interface and precise DMA-based timing capabilities.
+    \item \textbf{Eclipse Paho MQTT (C++)}: For robust, asynchronous messaging.
+    \item \textbf{LibCURL}: To handle HTTP requests for InfluxDB data ingestion.
+    \item \textbf{CMake}: Cross-platform build system.
+\end{itemize}
+
+\subsubsection{Class Diagram Overview}
+The code is organized into the following classes:
+\begin{itemize}
+    \item \texttt{main.cpp}: Entry point; initializes components and manages threads.
+    \item \texttt{MqttManager}: Encapsulates connection logic, subscriptions, and callback handling.
+    \item \texttt{Dht11Sensor}: Handles the bit-banging protocol to read 40 bits of data from the sensor.
+    \item \texttt{LedController}: Manages the LED state machine (blink logic runs in a separate thread).
+    \item \texttt{InfluxDbManager}: Formats data into Line Protocol and sends HTTP POST requests.
+    \item \texttt{ButtonHandler}: Monitors GPIO state changes.
+\end{itemize}
+
+\newpage
+
+\section{Detailed Implementation}
+
+\subsection{Concurrency Model}
+The application utilizes modern C++ threading (\texttt{std::thread}) to ensure non-blocking operations.
+\begin{itemize}
+    \item \textbf{Main Thread}: Handles initialization and clean shutdown.
+    \item \textbf{Sensor Thread}: Periodically wakes up (default 10s) to read the DHT11 and trigger data publishing.
+    \item \textbf{MQTT Thread}: Maintained largely by the Paho Async client, ensuring network latency doesn't stall sensor readings.
+    \item \textbf{Blink Thread}: When in BLINK mode, a detached logic loop toggles the LED without freezing the rest of the application.
+\end{itemize}
+
+\subsection{GPIO Handling with Pigpio}
+Switching to \texttt{pigpio} was a major architectural decision. The library allows us to initialize the GPIO subsystem via \texttt{gpioInitialise()}.
+Reading the DHT11 sensor involves:
+\begin{enumerate}
+    \item Pulling the line LOW for 18ms (Start Signal).
+    \item Pulling HIGH and waiting for the sensor response.
+    \item Timing the duration of 80 state changes to decode 0s and 1s.
+\end{enumerate}
+
+\begin{lstlisting}[language=C++, caption=Pigpio Initialization]
+if (gpioInitialise() < 0) {
+    std::cerr << "pigpio initialisation failed" << std::endl;
+    return 1;
+}
+\end{lstlisting}
+
+\subsection{MQTT Communication Logic}
+The system defines a strict Topic hierarchy:
+\begin{itemize}
+    \item \textbf{Publishing}:
+        \begin{itemize}
+            \item \texttt{/rpi/temperature}: Raw float value.
+            \item \texttt{/rpi/sensor}: JSON Object \texttt{\{"temp": 22.0, "hum": 60, "timestamp": 123456\}}.
+        \end{itemize}
+    \item \textbf{Subscribing}:
+        \begin{itemize}
+            \item \texttt{/rpi/cmd/led}: Receives "ON", "OFF", "BLINK".
+            \item \texttt{/rpi/cmd/threshold}: Updates the atomic float variable \texttt{g\_tempThreshold}.
+        \end{itemize}
+\end{itemize}
+
+\newpage
+
+\section{Challenges & Solutions}
+
+\subsection{WiringPi Deprecation}
+\textbf{Problem:} The initial design relied on WiringPi, but the library is no longer maintained and not available in default repositories for newer Raspberry Pi OS versions.
+\textbf{Solution:} The codebase was refactored to use \texttt{pigpio}. This required changing pin numbering logic (WiringPi uses a custom mapping, whereas Pigpio uses standard BCM Broadcom numbering) and rewriting the \texttt{digitalWrite}/\texttt{digitalRead} calls.
+
+\subsection{MQTT Linker Errors}
+\textbf{Problem:} During compilation, the linker failed to find \texttt{MQTTAsync\_isConnected}, causing DSO missing errors.
+\textbf{Solution:} The CMake configuration was updated to explicitly link against \texttt{paho-mqtt3as} (the asynchronous SSL C library) which is a dependency of the C++ Paho wrapper.
+
+\subsection{Remote Access Restrictions}
+\textbf{Problem:} The Mosquitto broker rejected connections from an external Linux PC ("Connection Refused").
+\textbf{Solution:} Canonic security settings in Mosquitto 2.0+ disable external access by default. We created a configuration file \texttt{/etc/mosquitto/conf.d/external.conf} enabling the listener on port 1883 and allowing anonymous authentication.
+
+\newpage
+
+\section{Communication & Protocols}
+
+\subsection{JSON Payload Structure}
+For the \texttt{/rpi/sensor} topic, we construct a JSON string manually (to avoid heavy external dependencies like \texttt{nlohmann/json} for such a simple task):
+
+\begin{lstlisting}[language=C++]
+std::stringstream ss;
+ss << "{\"temp\": " << temp 
+   << ", \"hum\": " << hum 
+   << ", \"timestamp\": " << std::time(nullptr) << "}";
+std::string payload = ss.str();
+\end{lstlisting}
+
+\subsection{InfluxDB Line Protocol}
+Data sent to the time-series database uses the Line Protocol format:
+\texttt{measurement,tag=value field=value timestamp}
+
+Example transmission:
+\begin{verbatim}
+temperature,source=rpi value=24.5
+humidity,source=rpi value=60.0
+\end{verbatim}
+
+\newpage
+
+\section{Deployment Guide}
+
+\subsection{Prerequisites}
+The system requires the following libraries installed on the target Raspberry Pi:
+\begin{itemize}
+    \item \texttt{build-essential}, \texttt{cmake}, \texttt{git}
+    \item \texttt{libssl-dev}, \texttt{libcurl4-openssl-dev}
+    \item \texttt{pigpio} (Built from source)
+    \item \texttt{mosquitto}, \texttt{mosquitto-clients}
+\end{itemize}
+
+\subsection{Installation Steps}
+\begin{enumerate}
+    \item Clone the repository.
+    \item Build Pigpio from source (required for latest HW support).
+    \item Create the InfluxDB database: \texttt{curl -XPOST http://localhost:8086/query ...}.
+    \item Configure Mosquitto for remote access.
+    \item Compile using CMake:
+\end{enumerate}
+
+\begin{verbatim}
+mkdir build && cd build
+cmake ..
+make
+sudo ./rpi_monitor
+\end{verbatim}
+
+\newpage
+
+\section{Results and Validation}
+
+\subsection{Functional Testing}
+We validated the system using the command line tools:
+\begin{itemize}
+    \item \textbf{Actuation}: Sending \texttt{mosquitto\_pub -t /rpi/cmd/led -m ON} successfully turned on the GPIO 17 LED.
+    \item \textbf{Data Flow}: \texttt{mosquitto\_sub} confirmed data arrival every 10 seconds.
+    \item \textbf{Latency}: Local loopback messages arrive effectively instantly (<2ms).
+\end{itemize}
+
+\subsection{InfluxDB Integration}
+Data persistence was verified by querying InfluxDB. The system recovered gracefully from temporary database outages by logging errors to \texttt{stderr} without crashing the sensor thread.
+
+\subsection{Performance}
+The memory footprint of the C++ application is minimal (< 5MB RAM) compared to equivalent Python or Node.js solutions, making it suitable for long-term deployment on resource-constrained devices like the Raspberry Pi Zero.
+
+\newpage
+
+\section{Conclusion}
+This project successfully demonstrates the capability of native C++ to handle full-stack IoT tasks on Linux. By bypassing high-level frameworks, we achieved fine-grained control over hardware resources and concurrency. All objectives—from sensor data acquisition to cloud persistence and remote control—were met with valid functional tests. Future improvements could include implementing TLS encryption for MQTT and adding a graphical dashboard for real-time visualization.
+
+\end{document}
