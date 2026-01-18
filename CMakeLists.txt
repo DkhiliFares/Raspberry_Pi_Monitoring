@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD 17)
 include_directories(include)
 
 # Find Paho MQTT
-find_library(PAHO_MQTT_C paho-mqtt3cs)
+find_library(PAHO_MQTT_C paho-mqtt3as)
 find_library(PAHO_MQTT_CPP paho-mqttpp3)
 
 # Find CURL
