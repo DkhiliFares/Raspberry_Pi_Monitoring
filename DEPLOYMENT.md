@@ -48,12 +48,16 @@ sudo ldconfig
 
 ### Install InfluxDB (if local)
 ```bash
-sudo apt install -y influxdb
+sudo apt install -y influxdb influxdb-client
 sudo systemctl unmask influxdb
 sudo systemctl enable influxdb
 sudo systemctl start influxdb
-# Create the database
+
+# Create the database using CLI
 influx -execute 'CREATE DATABASE sensor_data'
+
+# OR create using CURL if CLI is missing
+curl -i -XPOST http://localhost:8086/query --data-urlencode "q=CREATE DATABASE sensor_data"
 ```
 
 ## Compilation
@@ -78,8 +82,42 @@ make
    ```
 
 ## Testing via MQTT
-From another terminal or machine:
-- **Monitor Data**: `mosquitto_sub -t /rpi/# -v`
-- **Command LED**: `mosquitto_pub -t /rpi/cmd/led -m "BLINK"`
-- **Change Threshold**: `mosquitto_pub -t /rpi/cmd/threshold -m "25.0"`
-- **Change Period**: `mosquitto_pub -t /rpi/cmd/temp_period -m "5"`
+Open two terminal windows (or tabs) to test sending and receiving.
+
+### 1. Monitor All Outputs
+Subscribe to all `/rpi/` topics to see temperature, humidity, sensor JSON, status, and button events.
+```bash
+mosquitto_sub -t "/rpi/#" -v
+```
+*You should see data arriving every 10 seconds (default).*
+
+### 2. Send Control Commands
+In the second terminal, test the following commands:
+
+**LED Control:**
+```bash
+# Turn LED ON
+mosquitto_pub -t "/rpi/cmd/led" -m "ON"
+
+# Turn LED OFF
+mosquitto_pub -t "/rpi/cmd/led" -m "OFF"
+
+# Start Blinking
+mosquitto_pub -t "/rpi/cmd/led" -m "BLINK"
+```
+
+**Configuration:**
+```bash
+# Change sensor reading period to 5 seconds
+mosquitto_pub -t "/rpi/cmd/temp_period" -m "5"
+
+# Set temperature alert threshold to 25.5°C
+# (If current temp > 25.5, LED will auto-blink)
+mosquitto_pub -t "/rpi/cmd/threshold" -m "25.5"
+```
+
+**System:**
+```bash
+# Simulate Remote Reboot (Prints log message only)
+mosquitto_pub -t "/rpi/cmd/reboot" -m "now"
+```
