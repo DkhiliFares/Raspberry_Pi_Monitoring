@@ -16,6 +16,7 @@ sudo apt-get update
 sudo apt-get install -y cmake g++ git
 sudo apt-get install -y libssl-dev build-essential
 sudo apt-get install -y libcurl4-openssl-dev
+sudo apt-get install -y mosquitto mosquitto-clients
 # pigpio (Build from source if not in repo)
 wget https://github.com/joan2937/pigpio/archive/master.zip
 unzip master.zip
@@ -47,10 +48,12 @@ sudo ldconfig
 
 ### Install InfluxDB (if local)
 ```bash
-sudo apt install influxdb
+sudo apt install -y influxdb
 sudo systemctl unmask influxdb
 sudo systemctl enable influxdb
 sudo systemctl start influxdb
+# Create the database
+influx -execute 'CREATE DATABASE sensor_data'
 ```
 
 ## Compilation

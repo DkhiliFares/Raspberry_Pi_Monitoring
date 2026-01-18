@@ -131,16 +131,12 @@ int main() {
     // Optional: Toggle LED for local testing
     // led.on();
   });
-  btn.start();
-
-  // MQTT Setup
-  MyMqttCallback cb;
-  mqttClient.setCallback(cb);
-  mqttClient.connect();
-
   // Subscribe
   mqttClient.subscribe("/rpi/cmd/#");
   mqttClient.publish("/rpi/status", "online");
+
+  // Start Input Monitoring (after MQTT is ready)
+  btn.start();
 
   // Start Sensor Thread
   std::thread sensorThread(sensorLoop);
